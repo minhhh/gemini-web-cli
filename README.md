@@ -44,7 +44,7 @@ Cookies are read at runtime from the browser's own store. Nothing is copied into
 ```sh
 gemini-web-cli doctor                       # cookie, auth and connectivity checks
 gemini-web-cli chats list --limit 20
-gemini-web-cli chats read c_641ef3d6a739dedc
+gemini-web-cli chats read c_0123456789abcdef
 gemini-web-cli chats search kafka           # titles today, see roadmap
 gemini-web-cli chats delete c_... --yes     # destructive, --yes required
 ```

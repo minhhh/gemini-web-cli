@@ -43,7 +43,7 @@ async def _list(settings: Settings, limit: int) -> list[dict[str, Any]]:
 @chats_app.command("read")
 def read_command(
     ctx: typer.Context,
-    cid: str = typer.Argument(..., help="Conversation id, for example c_641ef3d6a739dedc."),
+    cid: str = typer.Argument(..., help="Conversation id, for example c_0123456789abcdef."),
     turns: int = typer.Option(200, "--turns", min=1, max=2000, help="Maximum turns to fetch."),
     oldest_first: bool = typer.Option(False, "--oldest-first", help="Reverse the default newest-first order."),
 ) -> None:
