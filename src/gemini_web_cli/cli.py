@@ -15,9 +15,14 @@ from gemini_web_cli.config import DEFAULT_BROWSER, SUPPORTED_BROWSERS, Settings
 from gemini_web_cli.errors import EXIT_ERROR, ToolError
 from gemini_web_cli.output import emit_error
 
+# rich_markup_mode=None keeps Typer on click's plain help formatter: no rounded box
+# panels around options, commands and errors, no ANSI styling. Typer has no global
+# switch and sub-apps do not inherit, so every typer.Typer(...) needs the flag.
 app = typer.Typer(
     add_completion=False,
     invoke_without_command=True,
+    rich_markup_mode=None,
+    context_settings={"help_option_names": ["-h", "--help"]},
     help="Manage Gemini conversations from the command line. JSON on stdout, logs on stderr.",
 )
 

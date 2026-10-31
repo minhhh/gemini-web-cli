@@ -13,7 +13,12 @@ from gemini_web_cli.config import Settings
 from gemini_web_cli.errors import ToolError
 from gemini_web_cli.output import emit
 
-chats_app = typer.Typer(no_args_is_help=True, help="List, read, search and delete Gemini conversations.")
+chats_app = typer.Typer(
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="List, read, search and delete Gemini conversations.",
+)
 
 
 def settings_of(ctx: typer.Context) -> Settings:

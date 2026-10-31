@@ -93,6 +93,7 @@ Defaults: `--browser edge`, state at `~/.local/state/gemini-web-cli`, 90s handsh
 
 - Python 3.11, `uv` for env and runs, `ruff` with line length 120, `pytest`
 - `typer` 0.27 does not depend on click and vendors its own internals. `except click.exceptions.Exit` crashes, use `typer.Exit`. Options are function calls in defaults, so `B008` is ignored per file
+- Help and usage errors render through click's plain formatter, not rich: every `typer.Typer(...)` carries `rich_markup_mode=None`, which is what removes the rounded box panels. There is no global switch and sub-apps do not inherit, so a new sub-Typer needs the flag or its help comes back boxed. Each `typer.Typer(...)` also sets `context_settings={"help_option_names": ["-h", "--help"]}` so `-h` works at every level; a new sub-Typer needs that too
 - Ruff rules `B008` and `ARG001` are suppressed for Typer command modules only
 
 ## Next steps, in order

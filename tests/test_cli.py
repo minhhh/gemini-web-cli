@@ -18,6 +18,14 @@ def test_root_help_lists_commands():
         assert name in result.stdout
 
 
+def test_short_help_flag_at_every_level():
+    for args in (["-h"], ["chats", "-h"], ["chats", "read", "-h"], ["doctor", "-h"]):
+        result = runner.invoke(cli.app, args)
+        assert result.exit_code == 0, args
+        assert "Usage:" in result.stdout, args
+        assert "-h, --help" in result.stdout, args
+
+
 def test_version_flag(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["gemini-web-cli", "--version"])
     with pytest.raises(SystemExit) as exc:
