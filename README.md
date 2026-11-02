@@ -13,19 +13,27 @@ uv run gemini-web-cli doctor
 
 ## Global flags
 
-These are root options, so they must come **before** the subcommand. Click parses them at the root only, which makes wrong placement a usage error rather than a warning:
+These are root options, so they must come **before** the subcommand. Click parses them at the root only, so the wrong placement is a usage error (exit `2`), not a warning:
 
 ```sh
 $ gemini-web-cli chats list --pretty
 Usage: gemini-web-cli chats list [OPTIONS]
+Try 'gemini-web-cli chats list -h' for help.
+
 Error: No such option: --pretty
+# exit 2, all of it on stderr; stdout is empty
 
 $ gemini-web-cli --pretty chats list
+{
+  "ok": true,
+  ...
+}
+# indented envelope, abbreviated
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`. |
+| `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`; any other value fails at runtime with `bad_browser` and exit `1`, not a usage error. |
 | `--home` | `~/.local/state/gemini-web-cli`, or `$GEMINI_WEB_CLI_HOME` when set | State directory holding the cookie cache. |
 | `--timeout` | `90` | Seconds to wait for the Gemini handshake. Minimum `5`. |
 | `--pretty` | off | Indent the JSON output. Compact by default, because tokens. |
@@ -40,7 +48,7 @@ $ gemini-web-cli --pretty chats list
 | `doctor` | Check cookies, state directory and authentication. |
 | `chats list` | List recent conversations, newest first. |
 | `chats read` | Read one conversation's turns. |
-| `chats search` | Match conversations by title. |
+| `chats search` | Case-insensitive substring match on titles. |
 | `chats delete` | Delete one conversation server-side. |
 
 | Command | Flag | Default | Meaning |
@@ -68,7 +76,7 @@ gemini-web-cli chats delete c_0123456789abcdef --yes
 
 ## Output contract
 
-One JSON document on stdout per run, success and failure alike.
+One JSON document on stdout for any run that reaches a command, success and failure alike. Usage errors are the exception: click writes the `Usage:` / `Error:` text to stderr, stdout stays empty, and the exit code is `2`. `--help` and `--version` also bypass the envelope, printing plain text on stdout with exit `0`. A script piping stdout into `jq` has to handle exit `2` producing no JSON at all.
 
 ```json
 {"ok": true, "command": "chats.list", "data": {"chats": [{"cid": "c_...", "title": "...", "pinned": false, "updated_at": "2026-02-10T00:15:18Z"}]}, "meta": {"count": 1}}
@@ -78,7 +86,7 @@ One JSON document on stdout per run, success and failure alike.
 {"ok": false, "command": "chats.read", "error": {"code": "auth_failed", "message": "...", "hint": "..."}}
 ```
 
-Errors are on stdout so a caller reads a single stream and branches on `ok`. Exit codes: `0` ok, `1` operation failed, `2` usage error, `3` authentication failed. Stable error codes include `auth_failed`, `not_found`, `confirmation_required`, `rate_limited`, `timeout`, `delete_failed`, `unexpected`.
+Inside the envelope, errors are on stdout so a caller reads a single stream and branches on `ok`. Exit codes: `0` ok, `1` operation failed, `2` usage error, `3` authentication failed. Error codes: `api_error`, `auth_failed`, `bad_browser`, `confirmation_required`, `delete_failed`, `gemini_error`, `missing_dependency`, `no_context`, `not_found`, `rate_limited`, `timeout`, `unexpected`, `usage_limit`.
 
 ## Cookies
 
