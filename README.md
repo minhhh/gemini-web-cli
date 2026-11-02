@@ -1,14 +1,8 @@
 # gemini-web-cli
 
-Manage Gemini conversations from the command line, built on `gemini-webapi`. Every command prints one JSON document on stdout. Logs go to stderr. Non-zero exit code on failure.
+Manage Gemini conversations from the command line.
 
-Scope: conversations only. List them, read them, search them, delete them. It does not send prompts, generate images, or run Deep Research.
-
-There is no official API for consumer Gemini conversations. This tool drives the same internal endpoints the web UI uses, authenticated with browser cookies.
-
-## Status
-
-Working: `chats list`, `chats read`, `chats search`, `chats delete`, `doctor`.
+There is no official API for consumer Gemini conversations, and Google Takeout exports are manual and unthreaded. This tool drives the same internal endpoints the web UI uses, authenticated with your browser cookies. Scope is conversation history only.
 
 ## Install
 
@@ -17,49 +11,93 @@ uv sync --extra dev
 uv run gemini-web-cli doctor
 ```
 
-## Output contract
+## Global flags
 
-Success, one line unless `--pretty`:
+These are root options, so they must come **before** the subcommand. Click parses them at the root only, which makes wrong placement a usage error rather than a warning:
 
-```json
-{"ok": true, "command": "chats.list", "data": {"chats": [{"cid": "c_...", "title": "...", "pinned": false, "updated_at": "2026-02-10T00:15:18Z"}]}, "meta": {"count": 20}}
+```sh
+$ gemini-web-cli chats list --pretty
+Usage: gemini-web-cli chats list [OPTIONS]
+Error: No such option: --pretty
+
+$ gemini-web-cli --pretty chats list
 ```
 
-Failure, still on stdout, exit code non-zero:
+| Flag | Default | Meaning |
+|---|---|---|
+| `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`. |
+| `--home` | `~/.local/state/gemini-web-cli`, or `$GEMINI_WEB_CLI_HOME` when set | State directory holding the cookie cache. |
+| `--timeout` | `90` | Seconds to wait for the Gemini handshake. Minimum `5`. |
+| `--pretty` | off | Indent the JSON output. Compact by default, because tokens. |
+| `--debug` | off | Verbose library logs on stderr, and a traceback attached to unexpected errors. |
+| `--version` | — | Print the version and exit. |
+| `-h`, `--help` | — | Help at the root, at `chats`, and on every subcommand. |
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `doctor` | Check cookies, state directory and authentication. |
+| `chats list` | List recent conversations, newest first. |
+| `chats read` | Read one conversation's turns. |
+| `chats search` | Match conversations by title. |
+| `chats delete` | Delete one conversation server-side. |
+
+| Command | Flag | Default | Meaning |
+|---|---|---|---|
+| `doctor` | `--offline` | off | Skip the authenticated network call. |
+| `chats list` | `-n`, `--limit` | `50` | Conversations to return. Range `1`–`200`. |
+| `chats read` | `--turns` | `200` | Turns to fetch. Range `1`–`2000`. |
+| `chats read` | `--oldest-first` | off | Reverse the default newest-first order. |
+| `chats search` | `-n`, `--limit` | `50` | Matches to return. Range `1`–`200`. |
+| `chats delete` | `-y`, `--yes` | off | Confirm the deletion. Required: without it the command refuses and deletes nothing. |
+
+```sh
+gemini-web-cli doctor
+gemini-web-cli doctor --offline
+gemini-web-cli chats list
+gemini-web-cli chats list -n 5
+gemini-web-cli --pretty chats list -n 5
+gemini-web-cli chats read c_0123456789abcdef
+gemini-web-cli chats read c_0123456789abcdef --oldest-first
+gemini-web-cli chats search kafka
+gemini-web-cli chats delete c_0123456789abcdef --yes
+```
+
+`chats search` reads titles, not bodies. It cannot find a thread by something said inside it, so a phrase you remember from a conversation returns nothing even though the conversation exists. Full-text search needs the local archive in the roadmap.
+
+## Output contract
+
+One JSON document on stdout per run, success and failure alike.
+
+```json
+{"ok": true, "command": "chats.list", "data": {"chats": [{"cid": "c_...", "title": "...", "pinned": false, "updated_at": "2026-02-10T00:15:18Z"}]}, "meta": {"count": 1}}
+```
 
 ```json
 {"ok": false, "command": "chats.read", "error": {"code": "auth_failed", "message": "...", "hint": "..."}}
 ```
 
-Exit codes: `0` ok, `1` operation failed, `2` usage error, `3` authentication failed.
+Errors are on stdout so a caller reads a single stream and branches on `ok`. Exit codes: `0` ok, `1` operation failed, `2` usage error, `3` authentication failed. Stable error codes include `auth_failed`, `not_found`, `confirmation_required`, `rate_limited`, `timeout`, `delete_failed`, `unexpected`.
 
-## Cookie source
+## Cookies
 
-Only one browser is read, chosen by `--browser` (default `edge`). The library by default scans every installed browser and merges the jars, which silently mixes Google accounts: a secondary account answers every call successfully with an empty list. This tool pins the source, skips the scan, and refuses to run when the session did not come from the supplied cookies.
+Only one browser is read, chosen by `--browser`. Cookies are read at runtime from that browser's own store, so nothing is copied into the repo.
 
-Cookies are read at runtime from the browser's own store. Nothing is copied into the repo.
+The underlying library would instead scan every installed browser and merge the jars, which silently mixes Google accounts. A wrong or guest account answers every call successfully with an empty list, so the failure looks like "no history" rather than an error. Observed directly: one browser held the account with 20 conversations while another held a different account with 0. This tool pins the source, skips the scan, and refuses to run when the session did not come from the supplied cookies. Do not add a fallback to auto-detection; that path is the bug this tool exists to prevent.
 
-## Commands
+`1PSIDTS` rotates. A stale cookie cache is the usual cause of "Are you signed in?" errors, and `doctor` reports it.
 
-```sh
-gemini-web-cli doctor                       # cookie, auth and connectivity checks
-gemini-web-cli chats list --limit 20
-gemini-web-cli chats read c_0123456789abcdef
-gemini-web-cli chats search kafka           # titles today, see roadmap
-gemini-web-cli chats delete c_... --yes     # destructive, --yes required
-```
+## Caveats
 
-Global flags: `--browser`, `--home`, `--timeout`, `--pretty`, `--debug`, `--version`.
+- Deleting is server-side and immediate. There is no undo, and `--yes` is the only guard.
+- Every command except `chats delete` is read-only and changes no server state.
+- Scraping is against Google's terms of service. Use it on your own account.
+- `--debug` output and cookie-cache warnings embed `__Secure-1PSID` in file paths. Do not paste them into a public issue or transcript. State directories are created `0700` for the same reason.
 
 ## Roadmap
 
-1. Local archive with incremental sync, so reads and search do not hit the network
+1. Local archive with incremental sync, so reads and search stop hitting the network
 2. Full-text search across conversation bodies, backed by that archive
 3. `chats export` to markdown or JSON, per conversation and in bulk
 4. Pagination past the first list page, once its shape is known
-
-## Notes
-
-- `1PSIDTS` rotates. A stale cookie cache is the usual cause of "Are you signed in?" errors
-- Deleting is server-side and immediate. There is no undo
-- Scraping is against Google's terms of service. Use it on your own account, read-only by default
