@@ -33,7 +33,7 @@ $ gemini-web-cli --pretty chats list
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`; any other value fails at runtime with `bad_browser` and exit `1`, not a usage error. |
+| `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`; any other value fails at runtime with `bad_browser` and exit `1`, not a usage error. Exception: a group with no subcommand (`chats` alone) never runs a command to check it, so the group's own usage error wins — exit `2`, help on stderr, empty stdout. |
 | `--home` | `~/.local/state/gemini-web-cli`, or `$GEMINI_WEB_CLI_HOME` when set | State directory holding the cookie cache. |
 | `--timeout` | `90` | Seconds to wait for the Gemini handshake. Minimum `5`. |
 | `--pretty` | off | Indent the JSON output. Compact by default, because tokens. |
