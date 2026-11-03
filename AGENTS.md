@@ -59,6 +59,8 @@ Errors are on stdout so an agent reads a single stream and branches on `ok`. Exi
 
 `--pretty` indents. Default is compact, because tokens.
 
+The `command` field is a fixed id (`chats.list`), never a copy of `sys.argv`: argv also holds global option values, so reading it produced ids like `/tmp/gw-x.nope`. Success and failure envelopes both take it from `invocation.name()`, recorded from the click context chain by `invocation.record()`, which the root callback and `settings_of()` call. A command must take its settings through `settings_of()` or its failures fall back to the parent group's name, and `test_every_command_refuses_an_unsupported_browser` fails when one does not. Global checks that fail must be raised from where settings are consumed, for the same reason.
+
 ## Layout
 
 ```
@@ -67,6 +69,7 @@ src/gemini_web_cli/
 ├── client.py       single-browser cookie policy, client factory, error mapping
 ├── config.py       Settings, state dir, supported browsers
 ├── errors.py       ToolError with codes and exit codes
+├── invocation.py   command path used by error envelopes
 ├── output.py       JSON envelope
 ├── serialize.py    Gemini objects to plain JSON
 └── commands/

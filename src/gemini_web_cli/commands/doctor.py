@@ -7,6 +7,7 @@ from typing import Any
 
 import typer
 
+from gemini_web_cli import invocation
 from gemini_web_cli.client import cookie_facts, open_client, state_writable
 from gemini_web_cli.commands.chats import settings_of
 from gemini_web_cli.errors import ToolError
@@ -46,7 +47,7 @@ def doctor(
     ok = all(check["ok"] for check in checks)
     emit(
         {"browser": settings.browser, "checks": checks},
-        command="doctor",
+        command=invocation.name(),
         meta={"ok": ok},
         pretty=settings.pretty,
     )

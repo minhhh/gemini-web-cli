@@ -8,10 +8,10 @@ from typing import Any
 
 import typer
 
-from gemini_web_cli import __version__
+from gemini_web_cli import __version__, invocation
 from gemini_web_cli.commands import doctor as doctor_command
 from gemini_web_cli.commands.chats import chats_app
-from gemini_web_cli.config import DEFAULT_BROWSER, SUPPORTED_BROWSERS, Settings
+from gemini_web_cli.config import DEFAULT_BROWSER, SUPPORTED_BROWSERS, Settings, ensure_supported_browser
 from gemini_web_cli.errors import EXIT_ERROR, ToolError
 from gemini_web_cli.output import emit_error
 
@@ -59,28 +59,22 @@ def root(
     if version:
         sys.stdout.write(__version__ + "\n")
         raise typer.Exit()
-    if browser not in SUPPORTED_BROWSERS:
-        raise ToolError(
-            "bad_browser",
-            f"Unsupported browser: {browser}",
-            hint="Choose one of: " + ", ".join(SUPPORTED_BROWSERS),
-        )
+    # Settings are stored before any validation: failures raised from this
+    # callback still need --pretty and --debug to apply.
     settings = Settings(browser=browser, home=home, timeout=timeout, pretty=pretty, debug=debug)
     _active["settings"] = settings
     ctx.obj = settings
+    invocation.record(ctx)
     configure_logging(debug)
     if ctx.invoked_subcommand is None:
+        # No command will run, so the browser check is not applied elsewhere.
+        ensure_supported_browser(browser)
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
 
 app.add_typer(chats_app, name="chats")
 app.command("doctor")(doctor_command.doctor)
-
-
-def _command_name() -> str:
-    words = [word for word in sys.argv[1:] if not word.startswith("-")]
-    return ".".join(words[:2]) if words else "gemini-web-cli"
 
 
 def _detail(exc: Exception) -> str | None:
@@ -92,12 +86,13 @@ def _detail(exc: Exception) -> str | None:
 
 
 def main() -> None:
+    invocation.clear()
     try:
         app(prog_name="gemini-web-cli")
     except ToolError as exc:
         settings = active_settings()
         emit_error(
-            command=_command_name(),
+            command=invocation.name(),
             code=exc.code,
             message=exc.message,
             hint=exc.hint,
@@ -111,7 +106,7 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - last resort, still machine readable
         settings = active_settings()
         emit_error(
-            command=_command_name(),
+            command=invocation.name(),
             code="unexpected",
             message=f"{type(exc).__name__}: {exc}",
             hint="Re-run with --debug for a traceback.",

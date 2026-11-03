@@ -7,9 +7,9 @@ from typing import Any
 
 import typer
 
-from gemini_web_cli import serialize
+from gemini_web_cli import invocation, serialize
 from gemini_web_cli.client import open_client
-from gemini_web_cli.config import Settings
+from gemini_web_cli.config import Settings, ensure_supported_browser
 from gemini_web_cli.errors import ToolError
 from gemini_web_cli.output import emit
 
@@ -22,9 +22,17 @@ chats_app = typer.Typer(
 
 
 def settings_of(ctx: typer.Context) -> Settings:
+    """Settings for the running command.
+
+    Records the command path first, so any failure reports a stable id, then
+    rejects a browser name no command can use. Every command calls this before
+    touching the network, which keeps both guarantees in one place.
+    """
+    invocation.record(ctx)
     settings = ctx.obj
     if not isinstance(settings, Settings):
         raise ToolError("no_context", "Settings were not initialised", hint="Run through the CLI entry point")
+    ensure_supported_browser(settings.browser)
     return settings
 
 
@@ -36,7 +44,7 @@ def list_command(
     """List recent conversations, newest first."""
     settings = settings_of(ctx)
     chats = asyncio.run(_list(settings, limit))
-    emit({"chats": chats}, command="chats.list", meta={"count": len(chats)}, pretty=settings.pretty)
+    emit({"chats": chats}, command=invocation.name(), meta={"count": len(chats)}, pretty=settings.pretty)
 
 
 async def _list(settings: Settings, limit: int) -> list[dict[str, Any]]:
@@ -58,7 +66,7 @@ def read_command(
     if oldest_first:
         history["turns"] = list(reversed(history["turns"]))
         history["order"] = "oldest_first"
-    emit(history, command="chats.read", meta={"turn_count": history["turn_count"]}, pretty=settings.pretty)
+    emit(history, command=invocation.name(), meta={"turn_count": history["turn_count"]}, pretty=settings.pretty)
 
 
 async def _read(settings: Settings, cid: str, turns: int) -> dict[str, Any]:
@@ -87,7 +95,7 @@ def search_command(
     matches = asyncio.run(_search(settings, query, limit))
     emit(
         {"query": query, "chats": matches},
-        command="chats.search",
+        command=invocation.name(),
         meta={"count": len(matches)},
         pretty=settings.pretty,
     )
@@ -120,7 +128,7 @@ def delete_command(
             hint="Re-run with --yes. Deletion is permanent and there is no undo.",
         )
     asyncio.run(_delete(settings, cid))
-    emit({"cid": cid, "deleted": True}, command="chats.delete", pretty=settings.pretty)
+    emit({"cid": cid, "deleted": True}, command=invocation.name(), pretty=settings.pretty)
 
 
 async def _delete(settings: Settings, cid: str) -> None:
