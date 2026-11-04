@@ -2,6 +2,8 @@
 
 State of the project as of first build. Read this before changing anything.
 
+Implementing a change means working in a worktree, not in this checkout. See [Agent workflow](#agent-workflow) before the first edit.
+
 ## What this is
 
 A Python CLI that manages Gemini conversations from the terminal, built on the `gemini-webapi` package. The command is `gemini-web-cli`, the package is `gemini_web_cli`, the folder is `local_tools/gemini-web-cli`.
@@ -94,31 +96,47 @@ Defaults: `--browser edge`, state at `~/.local/state/gemini-web-cli`, 90s handsh
 
 ## Agent workflow
 
-Two roles, two worktrees, two credentials. The worktree keeps agent branch churn out of your checkout; the credential decides which GitHub actor does the pushing.
+**Rule: implementing a change happens in a fresh worktree. Do not edit files in the main checkout.** Two reasons. Branch churn stays out of the checkout the user is working in, and an uncommitted change in that checkout is no longer something you have to work around.
 
-```sh
-# start a task
-wt=$(scripts/worktree.sh new fix-timeout)   # branch impl/fix-timeout from origin/main
-cd "$wt"
+The worktree decides where the edits land. The credential decides which GitHub actor does the pushing, and those are separate choices.
 
-# implement, as the agent identity, with its own PAT
-scripts/implementer.sh commit "fix: ..."
-scripts/implementer.sh git push -u origin HEAD
-scripts/implementer.sh gh pr create --fill
+When asked to implement a feature or a fix:
 
-# review, as the App bot, from the main checkout
-scripts/reviewer.sh pr review <n> --comment -b "..."
-scripts/reviewer.sh pr merge <n> --squash --auto
+1. Pick a kebab-case slug that says what the change is, not what number the issue has: `timeout-exit-code`, not `issue-42`
+2. Create the worktree and move into it. This prints the path and nothing else, so capture it
 
-# after merge
-scripts/worktree.sh rm fix-timeout
-```
+   ```sh
+   wt=$(scripts/worktree.sh new timeout-exit-code)   # branch impl/timeout-exit-code from origin/main
+   cd "$wt"
+   uv sync --extra dev                              # .venv is per checkout, not shared
+   ```
+
+3. Implement there, in that directory, for the whole task. If the task grows a second independent change, make a second worktree rather than mixing it into the same branch
+4. Commit and push as the implementer identity. Never plain `git commit` with the ambient git config
+
+   ```sh
+   scripts/implementer.sh commit "fix: return exit 1 when the thread is missing"
+   scripts/implementer.sh git push -u origin HEAD
+   scripts/implementer.sh gh pr create --fill
+   ```
+
+5. Review is the other role and the other credential: `scripts/reviewer.sh pr review <n> --comment -b "..."` from the main checkout. The bot's approval is what satisfies the required approval, since you cannot approve your own PR
+6. Report back the worktree path, the branch, and the PR URL. Those three are what the user needs to look at the work
+7. After the PR merges, remove the worktree from the main checkout: `scripts/worktree.sh rm timeout-exit-code`
+
+Do not use a worktree for reading. Answering a question, grepping the code, or reviewing a PR needs no checkout and no branch, and creates clutter to clean up.
+
+The rules that permissions do not enforce, so they are discipline:
+
+- Never commit as the implementer in the main checkout, and never push `main` from a worktree. The ruleset's admin bypass applies to your PAT, so it will not stop you
+- Never let the reviewer role commit. It has no author identity for a reason
+- Both wrappers read secrets from `$HOME`, so they behave the same in every worktree. Do not copy a key or a PAT into a repo, and do not add them to a worktree
+
+Mechanics worth knowing:
 
 - Worktrees live at `<parent>/.worktrees/<repo>/<slug>`, outside the repo, so no ignore entry is needed
-- One worktree per task, one branch per worktree, removed after merge. `scripts/worktree.sh prune` clears records left by a manual `rm -rf`
-- `uv sync` inside a fresh worktree, since `.venv` is per checkout and not shared
-- Never commit in the main checkout as the agent, and never push `main` from a worktree. The ruleset blocks it for the App but not for a PAT on your account, so that one is discipline
-- Both wrappers read secrets from `$HOME`, so they behave the same in every worktree
+- One worktree per task, one branch per worktree, removed after merge. `scripts/worktree.sh prune` clears stale records left by a manual `rm -rf`
+- `scripts/worktree.sh list` shows what is checked out where, which is the first thing to run when a branch in `git branch` is checked out but not visible in the main checkout
 
 ## Toolchain notes
 
