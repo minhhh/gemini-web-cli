@@ -137,6 +137,7 @@ Mechanics worth knowing:
 - Worktrees live at `<parent>/.worktrees/<repo>/<slug>`, outside the repo, so no ignore entry is needed
 - One worktree per task, one branch per worktree, removed after merge. `scripts/worktree.sh prune` clears stale records left by a manual `rm -rf`
 - `scripts/worktree.sh list` shows what is checked out where, which is the first thing to run when a branch in `git branch` is checked out but not visible in the main checkout
+- The commit author name is free text. github.com renders the account that owns the author email instead, so `minhhh-agent-implementer <4078393+minhhh@users.noreply.github.com>` reads `minhhh` on the web and the agent name in `git log --format='%an'`. Expected, not a misconfiguration. A `[bot]` badge needs the App's bot-owner email, which would move the commits off your account
 
 ## Toolchain notes
 
