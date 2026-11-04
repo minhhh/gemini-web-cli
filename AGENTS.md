@@ -92,6 +92,34 @@ Use `--home /tmp/gweb-state` when experimenting so the real state dir stays clea
 
 Defaults: `--browser edge`, state at `~/.local/state/gemini-web-cli`, 90s handshake timeout.
 
+## Agent workflow
+
+Two roles, two worktrees, two credentials. The worktree keeps agent branch churn out of your checkout; the credential decides which GitHub actor does the pushing.
+
+```sh
+# start a task
+wt=$(scripts/worktree.sh new fix-timeout)   # branch impl/fix-timeout from origin/main
+cd "$wt"
+
+# implement, as the agent identity, with its own PAT
+scripts/implementer.sh commit "fix: ..."
+scripts/implementer.sh git push -u origin HEAD
+scripts/implementer.sh gh pr create --fill
+
+# review, as the App bot, from the main checkout
+scripts/reviewer.sh pr review <n> --comment -b "..."
+scripts/reviewer.sh pr merge <n> --squash --auto
+
+# after merge
+scripts/worktree.sh rm fix-timeout
+```
+
+- Worktrees live at `<parent>/.worktrees/<repo>/<slug>`, outside the repo, so no ignore entry is needed
+- One worktree per task, one branch per worktree, removed after merge. `scripts/worktree.sh prune` clears records left by a manual `rm -rf`
+- `uv sync` inside a fresh worktree, since `.venv` is per checkout and not shared
+- Never commit in the main checkout as the agent, and never push `main` from a worktree. The ruleset blocks it for the App but not for a PAT on your account, so that one is discipline
+- Both wrappers read secrets from `$HOME`, so they behave the same in every worktree
+
 ## Toolchain notes
 
 - Python 3.11, `uv` for env and runs, `ruff` with line length 120, `pytest`
