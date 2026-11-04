@@ -55,7 +55,7 @@ commit)
 	[ $# -ge 1 ] || die 'usage: implementer.sh commit "<message>" [git commit args...]'
 	message=$1
 	shift
-	git_as_implementer commit -m "$message" -m "$trailer" "$@"
+	git_as_implementer commit -m "$message" "$@" -m "$trailer"
 	;;
 *)
 	die 'usage: implementer.sh {whoami|gh|git|commit} ...
