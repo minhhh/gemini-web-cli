@@ -78,6 +78,25 @@ def _install_browser_policy(browser: str) -> None:
     _PATCHED = True
 
 
+def _session_psid(client: Any) -> str | None:
+    return next((str(c.value) for c in client.cookies.jar if c.name == "__Secure-1PSID"), None)
+
+
+def _source_is_trusted(source: str, session_psid: str | None, supplied_psid: str) -> bool:
+    """Decide whether the cookie group behind a session belongs to the chosen browser.
+
+    The library tries its cookie cache before the cookies the caller supplied, and the
+    cache lives in this tool's state dir under a file name derived from __Secure-1PSID.
+    So a cache hit for the session just read from the chosen browser is ours, and it
+    holds the rotated __Secure-1PSIDTS: the freshest credential available. Rejecting it
+    would fail every run after the first. A cache hit for any other session, and any
+    browser-scan or guest fallback, still means the wrong account is in play.
+    """
+    if session_psid != supplied_psid:
+        return False
+    return source == "Base Cookies" or source.startswith("Cache")
+
+
 def _translate(exc: Exception) -> ToolError:
     from gemini_webapi import exceptions as gexc
 
@@ -126,11 +145,14 @@ async def open_client(settings: Settings) -> AsyncIterator[Any]:
         raise _translate(exc) from exc
 
     source = str(getattr(client, "_cookie_source", ""))
-    if not source.startswith("Base Cookies"):
+    if not _source_is_trusted(source, _session_psid(client), cookies["__Secure-1PSID"]):
         await client.close()
         raise auth_error(
-            f"Session resolved from {source or 'unknown source'}, not from the supplied cookies",
-            hint="A cached or merged cookie jar is in play. Delete the state dir and retry.",
+            f"Session resolved from {source or 'unknown source'}, not from the cookies read from {settings.browser}",
+            hint=(
+                "A merged or foreign cookie jar is in play. Delete the state dir and retry, "
+                "or point --browser at the browser logged in to the intended account."
+            ),
         )
 
     try:

@@ -43,7 +43,7 @@ Observed directly: Edge held the account with 20 conversations, Firefox held a d
 Guards in `client.py`:
 
 - Only the browser given by `--browser` is read. The library's scan is replaced in `sys.modules["gemini_webapi.utils.get_access_token"].load_browser_cookies`
-- Cookies are passed explicitly, so `cookie_source` must start with `Base Cookies` or the run aborts
+- Cookies are passed explicitly. After init the session's `__Secure-1PSID` must match the browser's, and `cookie_source` must be `Base Cookies` or a `Cache` hit: the cache lives in the tool's state dir, keyed by that same `__Secure-1PSID`, and carries the rotated `__Secure-1PSIDTS`. Anything else (`Browser (...)`, `Guest`, a cache for a different session) aborts. Rejecting every cache hit made the second run per `--home` fail with `auth_failed`
 - `GEMINI_COOKIE_PATH` points at the tool's own state dir, never the shared temp cache
 
 Note the patching gotcha: `import gemini_webapi.utils.get_access_token as gat` returns the *function* re-exported by the package, not the module. Patch through `sys.modules` or the assignment silently does nothing.
