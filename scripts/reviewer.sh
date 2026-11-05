@@ -79,6 +79,10 @@ if [ "$mode" = whoami ]; then
 	exit 0
 fi
 
+if [ "$mode" = token ] && [ $# -ge 1 ]; then
+	die "--token takes no gh arguments (got: $*)"
+fi
+
 if [ -z "$repo" ]; then
 	repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) ||
 		die "not in a repo, pass --repo owner/name"
@@ -97,8 +101,8 @@ fi
 
 if [ -z "$token" ]; then
 	jwt=$(app_jwt)
-	installation=$(app_api "$jwt" GET "/repos/$repo/installation" | jq -r .id) ||
-		die "no App installation found for $repo (is the App installed on it?)"
+	installation=$(app_api "$jwt" GET "/repos/$repo/installation" | jq -r '.id // empty')
+	[ -n "$installation" ] || die "no installation for $repo (is the App installed on it?)"
 	response=$(app_api "$jwt" POST "/app/installations/$installation/access_tokens")
 	token=$(printf '%s' "$response" | jq -r .token)
 	# expires_at is one hour out; drop five minutes so a slow call cannot land past it.
