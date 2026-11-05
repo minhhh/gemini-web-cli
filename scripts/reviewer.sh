@@ -2,7 +2,8 @@
 # Run gh as the GitHub App that reviews this repo, so the review actor is a bot
 # and not your account. Installation tokens last one hour and are cached.
 #
-#   scripts/reviewer.sh --whoami
+#   scripts/reviewer.sh --whoami                       # app slug, id, name
+#   scripts/reviewer.sh --token                        # print an installation token
 #   scripts/reviewer.sh pr review 42 --comment -b "notes"
 #   scripts/reviewer.sh --repo minhhh/other-repo pr list
 #
@@ -41,20 +42,36 @@ app_jwt() {
 		"$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key" | b64url)"
 }
 
-if [ "${1:-}" = "--whoami" ]; then
+mode=gh
+repo=""
+while [ $# -ge 1 ]; do
+	case "$1" in
+	--whoami)
+		mode=whoami
+		shift
+		;;
+	--token)
+		mode=token
+		shift
+		;;
+	--repo)
+		[ $# -ge 2 ] || die "--repo needs owner/name"
+		repo=$2
+		shift 2
+		;;
+	*) break ;;
+	esac
+done
+
+if [ "$mode" = whoami ]; then
 	GH_TOKEN="$(app_jwt)" exec gh api app --jq '{slug, id, name}'
 fi
 
-repo=""
-if [ "${1:-}" = "--repo" ]; then
-	[ $# -ge 2 ] || die "--repo needs owner/name"
-	repo=$2
-	shift 2
-fi
-[ $# -ge 1 ] || die "usage: reviewer.sh [--repo owner/name] <gh args...>"
 if [ -z "$repo" ]; then
-	repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+	repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) ||
+		die "not in a repo, pass --repo owner/name"
 fi
+[ "$mode" = token ] || [ $# -ge 1 ] || die "usage: reviewer.sh [--repo owner/name] [--token] <gh args...>"
 
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/gemini-web-cli"
 mkdir -p "$cache_dir"
@@ -76,6 +93,11 @@ if [ -z "$token" ]; then
 	# expires_at is one hour out; drop five minutes so a slow call cannot land past it.
 	printf '%s' "$response" | jq -c '{token, expires: ((.expires_at | fromdate) - 300)}' >"$cache"
 	chmod 600 "$cache"
+fi
+
+if [ "$mode" = token ]; then
+	printf '%s\n' "$token"
+	exit 0
 fi
 
 GH_TOKEN="$token" exec gh "$@"
