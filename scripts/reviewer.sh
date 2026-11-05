@@ -20,7 +20,7 @@ id_file="$state_dir/reviewer-app-id"
 die() { printf 'reviewer: %s\n' "$*" >&2; exit 2; }
 
 [ -r "$key" ] || die "no app private key at $key"
-for bin in gh openssl jq; do
+for bin in gh curl openssl jq; do
 	command -v "$bin" >/dev/null || die "missing dependency: $bin"
 done
 
@@ -40,6 +40,17 @@ app_jwt() {
 	payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$app_id" | b64url)
 	printf '%s.%s.%s' "$header" "$payload" \
 		"$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key" | b64url)"
+}
+
+# gh sends "Authorization: token <jwt>", which GitHub rejects for App JWTs.
+# App-scoped calls must carry "Bearer", so they go through curl.
+app_api() {
+	local jwt=$1 method=$2 path=$3 body
+	body=$(curl -sS --fail-with-body -X "$method" \
+		-H "Authorization: Bearer $jwt" \
+		-H "Accept: application/vnd.github+json" \
+		"https://api.github.com$path") || die "request failed: $method $path: $body"
+	printf '%s' "$body"
 }
 
 mode=gh
@@ -64,7 +75,8 @@ while [ $# -ge 1 ]; do
 done
 
 if [ "$mode" = whoami ]; then
-	GH_TOKEN="$(app_jwt)" exec gh api app --jq '{slug, id, name}'
+	app_api "$(app_jwt)" GET /app | jq '{slug, id, name}'
+	exit 0
 fi
 
 if [ -z "$repo" ]; then
@@ -85,10 +97,9 @@ fi
 
 if [ -z "$token" ]; then
 	jwt=$(app_jwt)
-	installation=$(GH_TOKEN="$jwt" gh api "repos/$repo/installation" --jq .id) ||
+	installation=$(app_api "$jwt" GET "/repos/$repo/installation" | jq -r .id) ||
 		die "no App installation found for $repo (is the App installed on it?)"
-	response=$(GH_TOKEN="$jwt" gh api -X POST "app/installations/$installation/access_tokens") ||
-		die "token exchange failed for installation $installation"
+	response=$(app_api "$jwt" POST "/app/installations/$installation/access_tokens")
 	token=$(printf '%s' "$response" | jq -r .token)
 	# expires_at is one hour out; drop five minutes so a slow call cannot land past it.
 	printf '%s' "$response" | jq -c '{token, expires: ((.expires_at | fromdate) - 300)}' >"$cache"
