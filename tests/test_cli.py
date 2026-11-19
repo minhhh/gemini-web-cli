@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from typer.core import TyperGroup
@@ -10,6 +13,7 @@ from typer.testing import CliRunner
 
 from gemini_web_cli import cli
 from gemini_web_cli.commands import chats
+from gemini_web_cli.config import Settings
 from gemini_web_cli.errors import ToolError
 
 runner = CliRunner()
@@ -106,7 +110,7 @@ def test_success_envelope_uses_the_same_command_id(monkeypatch, capsys):
     # Success envelopes derive the id from the same path as failures. Mirrors
     # the funnel test above without touching the network.
     async def no_chats(_settings, _limit):
-        return []
+        return [], 0
 
     monkeypatch.setattr(chats, "_list", no_chats)
     code, out = run_main(monkeypatch, capsys, ["--home", "/tmp/gw-x", "chats", "list"])
@@ -114,7 +118,40 @@ def test_success_envelope_uses_the_same_command_id(monkeypatch, capsys):
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["command"] == "chats.list"
-    assert payload["meta"] == {"count": 0}
+    assert payload["meta"] == {"count": 0, "available": 0, "truncated": False}
+
+
+def test_list_reports_a_limit_the_page_cannot_satisfy(monkeypatch, capsys):
+    # The library fills one page during init and has no continuation, so a
+    # limit past the page size used to look like a full answer.
+    async def one_chat(_settings, _limit):
+        return [{"cid": "c_1"}], 20
+
+    monkeypatch.setattr(chats, "_list", one_chat)
+    code, out = run_main(monkeypatch, capsys, ["--home", "/tmp/gw-x", "chats", "list", "-n", "1"])
+    assert code == 0
+    meta = json.loads(out)["meta"]
+    assert meta == {"count": 1, "available": 20, "truncated": True}
+
+
+def test_read_flags_a_cut_short_thread(monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        async def read_chat(self, cid, limit):
+            seen["limit"] = limit
+            turn = SimpleNamespace(role="user", text="hi", model_output=None)
+            return SimpleNamespace(cid=cid, turns=[turn] * limit)
+
+    @asynccontextmanager
+    async def fake_open(_settings):
+        yield FakeClient()
+
+    monkeypatch.setattr(chats, "open_client", fake_open)
+    payload = asyncio.run(chats._read(Settings(), "c_1", 2))
+    assert seen["limit"] == 3, "one extra turn is requested so truncation is detectable"
+    assert payload["turn_count"] == 2
+    assert payload["truncated"] is True
 
 
 def test_root_help_lists_commands():

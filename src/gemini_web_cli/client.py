@@ -8,9 +8,10 @@ is replaced by a loader that reads exactly one browser.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -19,10 +20,11 @@ from gemini_web_cli.config import Settings
 from gemini_web_cli.errors import ToolError, auth_error
 
 _COOKIE_DOMAIN = ".google.com"
-_PATCHED = False
+_patched_browser: str | None = None
+_cookie_rows: dict[str, list[dict[str, Any]]] = {}
 
 
-def _read_browser_cookies(browser: str) -> dict[str, str]:
+def _browser_cookie3() -> Any:
     try:
         import browser_cookie3 as bc3
     except ImportError as exc:  # pragma: no cover - dependency is declared
@@ -31,51 +33,68 @@ def _read_browser_cookies(browser: str) -> dict[str, str]:
             "browser-cookie3 is not installed",
             hint='Install with: uv sync --extra dev, or pip install "gemini-webapi[browser]"',
         ) from exc
+    return bc3
 
-    reader = getattr(bc3, browser, None)
+
+def _browser_rows(browser: str) -> list[dict[str, Any]]:
+    """Cookie rows for one browser, read once per process.
+
+    The credential lookup and the library's loader both call this. Each read can
+    prompt for keychain access and decrypt the store again, and a session cookie
+    that rotates between the two reads would leave the loader serving a different
+    value than the client was built from.
+    """
+    cached = _cookie_rows.get(browser)
+    if cached is not None:
+        return cached
+    reader = getattr(_browser_cookie3(), browser, None)
     if reader is None:
         raise ToolError(
             "bad_browser",
             f"browser-cookie3 has no reader for {browser}",
             hint="Try --browser edge or --browser firefox",
         )
-    jar = reader(domain_name=_COOKIE_DOMAIN)
-    return {cookie.name: cookie.value for cookie in jar if not cookie.is_expired()}
+    rows = [
+        {
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path,
+            "expires": cookie.expires,
+        }
+        for cookie in reader(domain_name=_COOKIE_DOMAIN)
+        if not cookie.is_expired()
+    ]
+    _cookie_rows[browser] = rows
+    return rows
+
+
+def _read_browser_cookies(browser: str) -> dict[str, str]:
+    return {row["name"]: row["value"] for row in _browser_rows(browser)}
 
 
 def _single_browser_loader(browser: str):
     def load(domain_name: str = "", verbose: bool = False) -> dict[str, list[dict[str, Any]]]:
-        del verbose  # part of the library's loader signature
+        del domain_name, verbose  # the rows already carry the domain, and verbose is library-only
         try:
-            jar = getattr(__import__("browser_cookie3"), browser)(domain_name=domain_name or _COOKIE_DOMAIN)
-        except Exception:  # noqa: BLE001 - loader contract swallows reader failures
+            rows = _browser_rows(browser)
+        except ToolError:
             return {}
-        rows = [
-            {
-                "name": cookie.name,
-                "value": cookie.value,
-                "domain": cookie.domain,
-                "path": cookie.path,
-                "expires": cookie.expires,
-            }
-            for cookie in jar
-            if not cookie.is_expired()
-        ]
-        return {browser: rows} if rows else {}
+        return {browser: [dict(row) for row in rows]} if rows else {}
 
     return load
 
 
 def _install_browser_policy(browser: str) -> None:
     """Replace the library's all-browser scan with a single-browser loader."""
-    global _PATCHED
-    if _PATCHED:
+    global _patched_browser
+    if _patched_browser == browser:
         return
     import gemini_webapi.utils.get_access_token  # noqa: F401 - ensure the module is loaded
 
     module = sys.modules["gemini_webapi.utils.get_access_token"]
     module.load_browser_cookies = _single_browser_loader(browser)  # type: ignore[attr-defined]
-    _PATCHED = True
+    _patched_browser = browser
 
 
 def _session_psid(client: Any) -> str | None:
@@ -159,6 +178,43 @@ async def open_client(settings: Settings) -> AsyncIterator[Any]:
         yield client
     finally:
         await client.close()
+
+
+def run(coro: Coroutine[Any, Any, Any], settings: Settings) -> Any:
+    """Run one command coroutine under the global deadline.
+
+    `--timeout` used to bound the handshake only, so a stalled read or delete
+    waited on the library's own 450s socket timeout with nothing above it.
+    """
+    try:
+        return asyncio.run(asyncio.wait_for(coro, timeout=settings.timeout))
+    except TimeoutError as exc:
+        raise ToolError(
+            "timeout",
+            f"Gemini did not finish within {settings.timeout:g} seconds",
+            hint="Retry, or raise --timeout.",
+        ) from exc
+
+
+def recent_chats(client: Any) -> list[Any]:
+    """The conversations this session can see.
+
+    `list_chats()` returns None when the account was unavailable at init, which
+    is not the same as an account with no conversations. Collapsing the two is
+    how a wrong-account session reports an empty history instead of an error.
+    """
+    chats = client.list_chats()
+    if chats is None:
+        status = getattr(getattr(client, "account_status", None), "name", "unknown")
+        raise auth_error(
+            f"Gemini returned no conversation list (account status: {status})",
+            hint=(
+                "The session cannot list conversations. Cookies from a different Google account "
+                "answer every call successfully with an empty result, so check which account is "
+                "logged in to the browser named by --browser, then run doctor."
+            ),
+        )
+    return chats
 
 
 def cookie_facts(browser: str) -> dict[str, Any]:

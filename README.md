@@ -35,7 +35,7 @@ $ gemini-web-cli --pretty chats list
 |---|---|---|
 | `--browser` | `edge` | Browser whose cookie store is read. One of `edge`, `chrome`, `brave`, `firefox`; any other value fails at runtime with `bad_browser` and exit `1`, not a usage error. Exception: a group with no subcommand (`chats` alone) never runs a command to check it, so the group's own usage error wins — exit `2`, help on stderr, empty stdout. |
 | `--home` | `~/.local/state/gemini-web-cli`, or `$GEMINI_WEB_CLI_HOME` when set | State directory holding the cookie cache. |
-| `--timeout` | `90` | Seconds to wait for the Gemini handshake. Minimum `5`. |
+| `--timeout` | `90` | Seconds allowed for one command, handshake included. Exceeding it fails with `timeout` and exit `1`. Minimum `5`. |
 | `--pretty` | off | Indent the JSON output. Compact by default, because tokens. |
 | `--debug` | off | Verbose library logs on stderr, and a traceback attached to unexpected errors. |
 | `--version` | — | Print the version and exit. |
@@ -45,7 +45,7 @@ $ gemini-web-cli --pretty chats list
 
 | Command | What it does |
 |---|---|
-| `doctor` | Check cookies, state directory and authentication. |
+| `doctor` | Check cookies, state directory, authentication and the account status Gemini reports. |
 | `chats list` | List recent conversations, newest first. |
 | `chats read` | Read one conversation's turns. |
 | `chats search` | Case-insensitive substring match on titles. |
@@ -54,8 +54,8 @@ $ gemini-web-cli --pretty chats list
 | Command | Flag | Default | Meaning |
 |---|---|---|---|
 | `doctor` | `--offline` | off | Skip the authenticated network call. |
-| `chats list` | `-n`, `--limit` | `50` | Conversations to return. Range `1`–`200`. |
-| `chats read` | `--turns` | `200` | Turns to fetch. Range `1`–`2000`. |
+| `chats list` | `-n`, `--limit` | `50` | Conversations to return. Range `1`–`200`. The library fills one page during the handshake, so `meta.available` reports how many that is. |
+| `chats read` | `--turns` | `200` | Turns to fetch. Range `1`–`2000`. `data.truncated` is `true` when more turns exist. |
 | `chats read` | `--oldest-first` | off | Reverse the default newest-first order. |
 | `chats search` | `-n`, `--limit` | `50` | Matches to return. Range `1`–`200`. |
 | `chats delete` | `-y`, `--yes` | off | Confirm the deletion. Required: without it the command refuses and deletes nothing. |
@@ -74,12 +74,14 @@ gemini-web-cli chats delete c_0123456789abcdef --yes
 
 `chats search` reads titles, not bodies. It cannot find a thread by something said inside it, so a phrase you remember from a conversation returns nothing even though the conversation exists. Full-text search needs the local archive in the roadmap.
 
+`chats list` and `chats search` see a single page of conversations, because the library fetches that page during the handshake and exposes no continuation. Both report `meta.available` next to `meta.count`, and `meta.truncated` when the limit hid part of that page, so a short answer is visible instead of looking complete. `chats read` asks the server for one turn more than the limit and drops it: `data.truncated` then says whether the thread continues past the turns returned.
+
 ## Output contract
 
 One JSON document on stdout for any run that reaches a command, success and failure alike. Usage errors are the exception: click writes the `Usage:` / `Error:` text to stderr, stdout stays empty, and the exit code is `2`. `--help` and `--version` also bypass the envelope, printing plain text on stdout with exit `0`. A script piping stdout into `jq` has to handle exit `2` producing no JSON at all.
 
 ```json
-{"ok": true, "command": "chats.list", "data": {"chats": [{"cid": "c_...", "title": "...", "pinned": false, "updated_at": "2026-02-10T00:15:18Z"}]}, "meta": {"count": 1}}
+{"ok": true, "command": "chats.list", "data": {"chats": [{"cid": "c_...", "title": "...", "pinned": false, "updated_at": "2026-02-10T00:15:18Z"}]}, "meta": {"count": 1, "available": 20, "truncated": true}}
 ```
 
 ```json
@@ -95,6 +97,8 @@ Only one browser is read, chosen by `--browser`. Cookies are read at runtime fro
 The underlying library would instead scan every installed browser and merge the jars, which silently mixes Google accounts. A wrong or guest account answers every call successfully with an empty list, so the failure looks like "no history" rather than an error. Observed directly: one browser held the account with 20 conversations while another held a different account with 0. This tool pins the source, skips the scan, and refuses to run when the session did not come from the supplied cookies. Do not add a fallback to auto-detection; that path is the bug this tool exists to prevent.
 
 `1PSIDTS` rotates. A stale cookie cache is the usual cause of "Are you signed in?" errors, and `doctor` reports it.
+
+A session the account cannot use for listing answers `auth_failed` instead of an empty list. The library distinguishes the two internally: `list_chats()` returns `None` when it never filled the cache, and `[]` for an account that genuinely has no conversations.
 
 ## Caveats
 

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import typer
 
 from gemini_web_cli import invocation
-from gemini_web_cli.client import cookie_facts, open_client, state_writable
+from gemini_web_cli.client import cookie_facts, open_client, recent_chats, run, state_writable
 from gemini_web_cli.commands.chats import settings_of
+from gemini_web_cli.config import Settings
 from gemini_web_cli.errors import ToolError
 from gemini_web_cli.output import emit
 
@@ -39,7 +39,7 @@ def doctor(
         record("auth", True, "skipped (--offline)")
     else:
         try:
-            detail = asyncio.run(_probe(settings))
+            detail = run(_probe(settings), settings)
             record("auth", True, detail)
         except ToolError as exc:
             record("auth", False, exc.message)
@@ -55,7 +55,14 @@ def doctor(
         raise typer.Exit(code=1)
 
 
-async def _probe(settings) -> str:
+async def _probe(settings: Settings) -> str:
+    """Authenticated call, reporting the account status the library resolved.
+
+    The status is the only evidence available about which Google account the
+    cookies belong to, and the browser stores on one machine hold different
+    ones. A healthy-looking doctor on the wrong account was the failure mode.
+    """
     async with open_client(settings) as client:
-        chats = client.list_chats() or []
-    return f"authenticated, {len(chats)} conversations visible"
+        status = getattr(getattr(client, "account_status", None), "name", "unknown")
+        chats = recent_chats(client)
+    return f"account status {status}, {len(chats)} conversations visible"

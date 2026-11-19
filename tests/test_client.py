@@ -1,15 +1,20 @@
-"""Cookie-source guard in open_client.
+"""Cookie policy and the request deadline.
 
 The library tries its cookie cache before the cookies the caller supplies, so the
 guard has to accept a cache hit that belongs to the chosen browser while still
 rejecting a jar that came from somewhere else. A fake client reproduces the
 library's cache-first ordering without touching the network or a real browser.
+
+The second half covers the other half of the invariant: only the browser named on
+the command line is read, the library's all-browser scan is replaced, and the
+store is read once per process.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -137,3 +142,112 @@ def test_browser_scan_fallback_is_rejected(tmp_path, fake_library):
     with pytest.raises(ToolError) as exc:
         _run(Settings(browser="edge", home=tmp_path))
     assert exc.value.code == "auth_failed"
+
+
+class BrowserCookie:
+    def __init__(self, name: str, value: str, expired: bool = False) -> None:
+        self.name = name
+        self.value = value
+        self.domain = ".google.com"
+        self.path = "/"
+        self.expires = 0
+        self._expired = expired
+
+    def is_expired(self) -> bool:
+        return self._expired
+
+
+@pytest.fixture
+def fake_browser(monkeypatch):
+    """A stand-in browser_cookie3 module that records which readers ran."""
+    calls: list[str] = []
+
+    def edge(**_kw):
+        calls.append("edge")
+        return [
+            BrowserCookie("__Secure-1PSID", "psid"),
+            BrowserCookie("__Secure-1PSIDTS", "psidts"),
+            BrowserCookie("stale", "expired-value", expired=True),
+        ]
+
+    def firefox(**_kw):
+        calls.append("firefox")
+        return []
+
+    module = SimpleNamespace(edge=edge, firefox=firefox)
+    monkeypatch.setitem(sys.modules, "browser_cookie3", module)
+    monkeypatch.setattr(client_module, "_cookie_rows", {})
+    monkeypatch.setattr(client_module, "_patched_browser", None)
+    # The policy patch writes to the real library module. Recording the current
+    # loader lets monkeypatch put it back when the test ends.
+    import gemini_webapi  # noqa: F401 - ensures the submodule is importable
+
+    library = sys.modules["gemini_webapi.utils.get_access_token"]
+    monkeypatch.setattr(library, "load_browser_cookies", library.load_browser_cookies)
+    return calls
+
+
+def test_cookie_store_is_read_once(fake_browser):
+    calls = fake_browser
+    first = client_module._read_browser_cookies("edge")
+    second = client_module._read_browser_cookies("edge")
+    assert first == second
+    assert calls == ["edge"]
+    assert "stale" not in first
+
+
+def test_loader_serves_only_the_chosen_browser(fake_browser):
+    calls = fake_browser
+    rows = client_module._single_browser_loader("edge")()
+    assert set(rows) == {"edge"}
+    assert [row["name"] for row in rows["edge"]] == ["__Secure-1PSID", "__Secure-1PSIDTS"]
+    assert "firefox" not in calls
+
+
+@pytest.mark.usefixtures("fake_browser")
+def test_patch_lands_on_the_library_module():
+    import gemini_webapi  # noqa: F401 - ensures the submodule exists
+
+    client_module._install_browser_policy("edge")
+    module = sys.modules["gemini_webapi.utils.get_access_token"]
+    assert module.load_browser_cookies(domain_name=".google.com").keys() == {"edge"}
+
+    # A later command in the same process with another browser must repatch,
+    # not keep serving the first one.
+    client_module._install_browser_policy("firefox")
+    assert module.load_browser_cookies() == {}
+
+
+@pytest.mark.usefixtures("fake_browser")
+def test_open_client_refuses_a_session_without_1psid(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys.modules["browser_cookie3"],
+        "edge",
+        lambda **_kw: [BrowserCookie("NID", "no-session-cookie")],
+    )
+
+    async def enter():
+        async with client_module.open_client(Settings(home=tmp_path)):
+            raise AssertionError("open_client yielded without a session cookie")
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(enter())
+    assert excinfo.value.code == "auth_failed"
+    assert excinfo.value.exit_code == 3
+
+
+def test_recent_chats_rejects_a_missing_list():
+    fake = SimpleNamespace(list_chats=lambda: None, account_status=SimpleNamespace(name="UNAVAILABLE"))
+    with pytest.raises(ToolError) as excinfo:
+        client_module.recent_chats(fake)
+    assert excinfo.value.code == "auth_failed"
+    assert "UNAVAILABLE" in excinfo.value.message
+
+
+def test_run_enforces_the_command_deadline():
+    async def slow():
+        await asyncio.sleep(5)
+
+    with pytest.raises(ToolError) as excinfo:
+        client_module.run(slow(), Settings(timeout=0.05))
+    assert excinfo.value.code == "timeout"

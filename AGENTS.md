@@ -16,9 +16,9 @@ Why it exists: there is no official API for consumer Gemini conversations. Expor
 
 | Command | State | Notes |
 |---|---|---|
-| `doctor` | done | cookie inventory, state dir writability, authenticated probe |
-| `chats list` | done | returns one page, currently 20 conversations |
-| `chats read` | done | full turns, newest first, `--oldest-first` to reverse |
+| `doctor` | done | cookie inventory, state dir writability, authenticated probe, account status |
+| `chats list` | done | one page; `meta.available` reports how many that page holds |
+| `chats read` | done | full turns, newest first, `--oldest-first` to reverse, `truncated` when the limit cut it |
 | `chats search` | partial | titles only, full text needs the archive |
 | `chats delete` | done | requires `--yes`, verifies by re-reading |
 
@@ -92,7 +92,7 @@ uv run ruff check .
 
 Use `--home /tmp/gweb-state` when experimenting so the real state dir stays clean. `--debug` sends library logs to stderr and adds a traceback to unexpected errors.
 
-Defaults: `--browser edge`, state at `~/.local/state/gemini-web-cli`, 90s handshake timeout.
+Defaults: `--browser edge`, state at `~/.local/state/gemini-web-cli`, 90s per command including the handshake.
 
 ## Agent workflow
 

@@ -42,6 +42,7 @@ def chat_history(history: Any) -> dict[str, Any]:
         "cid": str(getattr(history, "cid", "")),
         "order": "newest_first",
         "turn_count": len(turns),
+        "truncated": False,
         "turns": turns,
     }
 
