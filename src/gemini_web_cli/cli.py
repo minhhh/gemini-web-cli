@@ -50,7 +50,7 @@ def root(
         help="Browser whose cookies are used. One of: " + ", ".join(SUPPORTED_BROWSERS) + ".",
     ),
     home: Path | None = typer.Option(None, "--home", help="State directory. Default: ~/.local/state/gemini-web-cli"),
-    timeout: float = typer.Option(90.0, "--timeout", min=5.0, help="Seconds to wait for the Gemini handshake."),
+    timeout: float = typer.Option(90.0, "--timeout", min=5.0, help="Seconds allowed per command, handshake included."),
     pretty: bool = typer.Option(False, "--pretty", help="Indent JSON output."),
     debug: bool = typer.Option(False, "--debug", help="Verbose logs, extra detail in errors."),
     version: bool = typer.Option(False, "--version", is_eager=True, help="Print the version and exit."),
